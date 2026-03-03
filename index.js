@@ -1,14 +1,30 @@
 const { getAllFilePathsWithExtension, readFile } = require('./fileSystem');
-const { readLine } = require('./console');
+const readline = require('readline');
+const path = require('path');
 
 const files = getFiles();
 
 console.log('Please, write your command!');
 readLine(processCommand);
 
+function readLine(callback) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: false
+    });
+
+    rl.on('line', (line) => {
+        callback(line.trim());
+    });
+}
+
 function getFiles() {
     const filePaths = getAllFilePathsWithExtension(process.cwd(), 'js');
-    return filePaths.map(path => readFile(path));
+    return filePaths.map(filePath => ({
+        path: filePath,
+        content: readFile(filePath)
+    }));
 }
 
 function processCommand(command) {
@@ -35,7 +51,6 @@ function processCommand(command) {
             break;
         case 'date':
             const filterDate = new Date(arg);
-            // Показываем только те, у которых дата валидна и больше заданной
             printTable(todos.filter(t => t.date && t.date >= filterDate));
             break;
         default:
@@ -46,27 +61,30 @@ function processCommand(command) {
 
 function getAllTodos() {
     const todos = [];
-    const todoRegex = /\/\/ TODO.*/g;
+    const todoRegex = /\/\/\s*todo\s*:?\s*.*/gi;
 
-    for (const fileContent of files) {
-        const matches = fileContent.match(todoRegex);
+    for (const file of files) {
+        const matches = file.content.match(todoRegex);
         if (matches) {
-            todos.push(...matches);
+            for (const raw of matches) {
+                todos.push({ raw, file: file.path });
+            }
         }
     }
     return todos;
 }
 
-function parseTodo(rawStr) {
-    const content = rawStr.replace('// TODO ', '');
+function parseTodo({ raw, file }) {
+    const content = raw.replace(/\/\/\s*todo\s*:?\s*/i, '');
     const parts = content.split(';').map(p => p.trim());
     const isFullFormat = parts.length === 3;
 
     return {
-        raw: rawStr,
+        raw: raw,
+        file: path.basename(file),
         user: isFullFormat ? parts[0].toLowerCase() : null,
         date: isFullFormat ? new Date(parts[1]) : null,
-        importance: (rawStr.match(/!/g) || []).length,
+        importance: (raw.match(/!/g) || []).length,
         comment: isFullFormat ? parts[2] : content
     };
 }
@@ -93,7 +111,6 @@ function sortTodos(todos, type) {
     }
 }
 
-
 function formatDate(date) {
     if (!date || isNaN(date.getTime())) return '';
     const y = date.getFullYear();
@@ -112,42 +129,38 @@ function printTable(todos) {
         { key: 'importance', max: 1, title: '!' },
         { key: 'user', max: 10, title: 'user' },
         { key: 'date', max: 10, title: 'date' },
-        { key: 'comment', max: 50, title: 'comment' }
+        { key: 'comment', max: 50, title: 'comment' },
+        { key: 'file', max: 30, title: 'file' }
     ];
 
-    // Вспомогательная функция для получения строкового значения из TODO
     const getVal = (t, key) => {
         switch(key) {
             case 'importance': return t.importance > 0 ? '!' : '';
             case 'user': return t.user || '';
             case 'date': return formatDate(t.date);
             case 'comment': return t.comment || '';
+            case 'file': return t.file || '';
             default: return '';
         }
     };
 
-    // Вычисляем динамическую ширину колонок (по самому длинному значению, но не более max)
     const widths = config.map(col => {
         const lengths = [col.title.length, ...todos.map(t => getVal(t, col.key).length)];
         return Math.min(Math.max(...lengths), col.max);
     });
 
-    // Формируем строку
     const createRow = (dataArray) => {
         return '  ' + dataArray.map((val, i) => truncate(val, widths[i])).join('  |  ') + '  ';
     };
 
-    // Печать заголовка
     const header = createRow(config.map(c => c.title));
     console.log(header);
     console.log('-'.repeat(header.length));
 
-    // Печать строк данных
     todos.forEach(t => {
         const rowData = config.map(col => getVal(t, col.key));
         console.log(createRow(rowData));
     });
 
-    // Печать подвала (опционально, для красоты)
     if (todos.length > 0) console.log('-'.repeat(header.length));
 }
